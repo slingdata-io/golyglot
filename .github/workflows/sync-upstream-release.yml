@@ -1,0 +1,74 @@
+name: sync-upstream-release
+
+on:
+  schedule:
+    - cron: '15 9 * * 1' # Every Monday at 09:15 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get versions
+        id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          UPSTREAM=$(gh api repos/tobilg/polyglot/releases/latest --jq '.tag_name' | sed 's/^v//')
+          CURRENT=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name' 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+          echo "upstream=$UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Upstream: $UPSTREAM | Current: $CURRENT"
+
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.versions.outputs.upstream }}" = "${{ steps.versions.outputs.current }}" ]; then
+            echo "Already up to date (v${{ steps.versions.outputs.current }})"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version available: ${{ steps.versions.outputs.upstream }}"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update version in golyglot.go
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.versions.outputs.upstream }}"
+          sed -i "s/Version = \".*\"/Version = \"${VERSION}\"/" golyglot.go
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add golyglot.go
+          git commit -m "bump version to v${VERSION}"
+          git push
+
+      - name: Download upstream assets
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.versions.outputs.upstream }}"
+          mkdir -p assets
+          gh release download "v${VERSION}" \
+            --repo tobilg/polyglot \
+            --dir ./assets \
+            --pattern 'polyglot-sql-ffi-*'
+          gh release download "v${VERSION}" \
+            --repo tobilg/polyglot \
+            --dir ./assets \
+            --pattern 'checksums.sha256' || true
+
+      - name: Create release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.versions.outputs.upstream }}"
+          gh release create "v${VERSION}" ./assets/* \
+            --title "v${VERSION}" \
+            --notes "Mirror of [tobilg/polyglot v${VERSION}](https://github.com/tobilg/polyglot/releases/tag/v${VERSION})"
