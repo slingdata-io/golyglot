@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '15 9 * * 1' # Every Monday at 09:15 UTC
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (must start with v, e.g. v1.0.0)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -13,33 +18,71 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get versions
         id: versions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Get latest upstream polyglot version
           UPSTREAM=$(gh api repos/tobilg/polyglot/releases/latest --jq '.tag_name' | sed 's/^v//')
-          CURRENT=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name' 2>/dev/null | sed 's/^v//' || echo "0.0.0")
           echo "upstream=$UPSTREAM" >> "$GITHUB_OUTPUT"
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "Upstream: $UPSTREAM | Current: $CURRENT"
 
-      - name: Check if update needed
-        id: check
+          # Get current golyglot release info
+          CURRENT_TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name' 2>/dev/null | sed 's/^v//' || echo "")
+          CURRENT_POLYGLOT=$(gh api repos/${{ github.repository }}/releases/latest --jq '.body' 2>/dev/null | grep -oP '^polyglot-version: \K.*' || echo "")
+          echo "current_tag=$CURRENT_TAG" >> "$GITHUB_OUTPUT"
+          echo "current_polyglot=$CURRENT_POLYGLOT" >> "$GITHUB_OUTPUT"
+
+          echo "Upstream polyglot: $UPSTREAM"
+          echo "Current golyglot tag: $CURRENT_TAG"
+          echo "Current polyglot bundled: $CURRENT_POLYGLOT"
+
+      - name: Validate version override
+        if: inputs.version != ''
         run: |
-          if [ "${{ steps.versions.outputs.upstream }}" = "${{ steps.versions.outputs.current }}" ]; then
-            echo "Already up to date (v${{ steps.versions.outputs.current }})"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version available: ${{ steps.versions.outputs.upstream }}"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs.version }}" != v* ]]; then
+            echo "::error::Version override must start with 'v' (e.g. v1.0.0), got '${{ inputs.version }}'"
+            exit 1
           fi
 
-      - name: Update version in golyglot.go
-        if: steps.check.outputs.skip == 'false'
+      - name: Determine next version
+        id: next
         run: |
-          VERSION="${{ steps.versions.outputs.upstream }}"
+          UPSTREAM="${{ steps.versions.outputs.upstream }}"
+          CURRENT_TAG="${{ steps.versions.outputs.current_tag }}"
+          CURRENT_POLYGLOT="${{ steps.versions.outputs.current_polyglot }}"
+
+          # On cron: skip if polyglot version hasn't changed
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$UPSTREAM" = "$CURRENT_POLYGLOT" ]; then
+            echo "Polyglot version unchanged, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          # Use override if provided, otherwise auto-increment patch
+          if [ -n "${{ inputs.version }}" ]; then
+            NEXT=$(echo "${{ inputs.version }}" | sed 's/^v//')
+          elif [ -z "$CURRENT_TAG" ]; then
+            NEXT="0.1.0"
+          else
+            MAJOR=$(echo "$CURRENT_TAG" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT_TAG" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT_TAG" | cut -d. -f3)
+            NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next golyglot version: $NEXT"
+
+      - name: Update version in golyglot.go
+        if: steps.next.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.next.outputs.version }}"
           sed -i "s/Version = \".*\"/Version = \"${VERSION}\"/" golyglot.go
           if git diff --quiet golyglot.go; then
             echo "Version already matches in source, skipping commit"
@@ -52,27 +95,33 @@ jobs:
           fi
 
       - name: Download upstream assets
-        if: steps.check.outputs.skip == 'false'
+        if: steps.next.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.versions.outputs.upstream }}"
+          UPSTREAM="${{ steps.versions.outputs.upstream }}"
           mkdir -p assets
-          gh release download "v${VERSION}" \
+          gh release download "v${UPSTREAM}" \
             --repo tobilg/polyglot \
             --dir ./assets \
             --pattern 'polyglot-sql-ffi-*'
-          gh release download "v${VERSION}" \
+          gh release download "v${UPSTREAM}" \
             --repo tobilg/polyglot \
             --dir ./assets \
             --pattern 'checksums.sha256' || true
 
       - name: Create release
-        if: steps.check.outputs.skip == 'false'
+        if: steps.next.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.versions.outputs.upstream }}"
+          VERSION="${{ steps.next.outputs.version }}"
+          UPSTREAM="${{ steps.versions.outputs.upstream }}"
           gh release create "v${VERSION}" ./assets/* \
             --title "v${VERSION}" \
-            --notes "Mirror of [tobilg/polyglot v${VERSION}](https://github.com/tobilg/polyglot/releases/tag/v${VERSION})"
+            --notes "$(cat <<EOF
+          polyglot-version: ${UPSTREAM}
+
+          Mirror of [tobilg/polyglot v${UPSTREAM}](https://github.com/tobilg/polyglot/releases/tag/v${UPSTREAM})
+          EOF
+          )"
