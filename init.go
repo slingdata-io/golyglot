@@ -85,9 +85,8 @@ func libraryFileName() string {
 func searchPaths() []string {
 	paths := []string{}
 
-	// ~/.sling/lib/
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".sling", "lib"))
+	if libDir := os.Getenv("GOLYGLOT_LIBRARY_FOLDER"); libDir != "" {
+		paths = append(paths, libDir)
 	}
 
 	// Current directory
@@ -100,13 +99,11 @@ func searchPaths() []string {
 
 // downloadLibrary fetches the library from GitHub releases to ~/.sling/lib/.
 func downloadLibrary() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine home directory: %w", err)
-	}
 
-	libDir := filepath.Join(home, ".sling", "lib")
-	if err := os.MkdirAll(libDir, 0755); err != nil {
+	libDir := os.Getenv("GOLYGLOT_LIBRARY_FOLDER")
+	if libDir == "" {
+		return "", fmt.Errorf("need to specify env var GOLYGLOT_LIBRARY_FOLDER")
+	} else if err := os.MkdirAll(libDir, 0755); err != nil {
 		return "", fmt.Errorf("cannot create %s: %w", libDir, err)
 	}
 

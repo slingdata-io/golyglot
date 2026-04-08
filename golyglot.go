@@ -1,7 +1,7 @@
 // Package golyglot provides Go bindings for the polyglot-sql library,
 // a multi-dialect SQL parser, formatter, and transpiler.
 //
-// The library is loaded on first use from ~/.sling/lib/ or a path
+// The library is loaded on first use from a path
 // specified by the GOLYGLOT_LIBRARY_PATH environment variable.
 // If not found, it is automatically downloaded from GitHub releases.
 package golyglot
