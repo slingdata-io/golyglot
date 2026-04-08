@@ -41,11 +41,15 @@ jobs:
         run: |
           VERSION="${{ steps.versions.outputs.upstream }}"
           sed -i "s/Version = \".*\"/Version = \"${VERSION}\"/" golyglot.go
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add golyglot.go
-          git commit -m "bump version to v${VERSION}"
-          git push
+          if git diff --quiet golyglot.go; then
+            echo "Version already matches in source, skipping commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add golyglot.go
+            git commit -m "bump version to v${VERSION}"
+            git push
+          fi
 
       - name: Download upstream assets
         if: steps.check.outputs.skip == 'false'
