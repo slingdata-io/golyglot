@@ -16,7 +16,7 @@ import (
 
 const (
 	// Version of the polyglot-sql FFI library to download.
-	Version = "1.0.10"
+	Version = "1.0.11"
 
 	// GitHub release URL pattern for downloading the FFI library.
 	releaseURLPattern = "https://github.com/slingdata-io/golyglot/releases/download/v%s/polyglot-sql-ffi-%s-%s.%s"
