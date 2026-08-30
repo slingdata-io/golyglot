@@ -28,20 +28,15 @@ func initLib() error {
 	}
 	libHandle = lib
 
-	// Register all FFI functions. purego handles struct returns (including ARM64 x8/sret).
-	purego.RegisterLibFunc(&ffiParse, lib, "polyglot_parse")
-	purego.RegisterLibFunc(&ffiParseOne, lib, "polyglot_parse_one")
-	purego.RegisterLibFunc(&ffiGenerate, lib, "polyglot_generate")
-	purego.RegisterLibFunc(&ffiTranspile, lib, "polyglot_transpile")
-	purego.RegisterLibFunc(&ffiFormat, lib, "polyglot_format")
-	purego.RegisterLibFunc(&ffiValidate, lib, "polyglot_validate")
-	purego.RegisterLibFunc(&ffiTokenize, lib, "polyglot_tokenize")
+	// Struct-returning functions need per-platform registration. purego rejects
+	// struct arguments on Windows, so registerStructFuncs uses the Win64 hidden
+	// return pointer there and purego struct returns elsewhere.
+	registerStructFuncs(lib)
+
 	purego.RegisterLibFunc(&ffiVersion, lib, "polyglot_version")
 	purego.RegisterLibFunc(&ffiDialectList, lib, "polyglot_dialect_list")
 	purego.RegisterLibFunc(&ffiDialectCount, lib, "polyglot_dialect_count")
 	purego.RegisterLibFunc(&ffiFreeString, lib, "polyglot_free_string")
-	purego.RegisterLibFunc(&ffiFreeResult, lib, "polyglot_free_result")
-	purego.RegisterLibFunc(&ffiFreeValidation, lib, "polyglot_free_validation_result")
 
 	return nil
 }
